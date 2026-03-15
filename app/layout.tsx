@@ -47,7 +47,15 @@ export default function RootLayout({
           <a href="/" style={{ color: '#f5f0e8', fontSize: '1.5rem', fontWeight: 'bold', textDecoration: 'none' }}>
             🌍 InvesTerra
           </a>
-
+        {/* Nav links */}
+        <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center' }}>
+          <a href="/parcels" style={{ color: '#a8c5a0', textDecoration: 'none', fontSize: '0.95rem' }}>
+            Browse
+          </a>
+          <a href="/map" style={{ color: '#a8c5a0', textDecoration: 'none', fontSize: '0.95rem' }}>
+            🗺️ Map
+          </a>
+        </div>
           {/* Right side */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             {user ? (
