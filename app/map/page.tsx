@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { api } from '@/lib/api'
 import dynamic from 'next/dynamic'
 
 const MapComponent = dynamic(() => import('@/components/MapComponent'), {
@@ -21,18 +21,43 @@ const MapComponent = dynamic(() => import('@/components/MapComponent'), {
   )
 })
 
+interface Property {
+  id: string
+  title: string
+  latitude: number
+  longitude: number
+  availableShares: number
+  pricePerShare: number
+}
+
 export default function MapPage() {
-  const [parcels, setParcels] = useState<any[]>([])
+  const [parcels, setParcels] = useState<Property[]>([])
 
   useEffect(() => {
     const fetchParcels = async () => {
-      const { data } = await supabase
-        .from('land_parcels')
-        .select('*')
-      setParcels(data || [])
+      const res = await api.get<{ properties: Property[] }>('/api/properties')
+      if (res.ok && res.data) {
+        // Map to format expected by MapComponent
+        setParcels(res.data.properties.map(p => ({
+          ...p,
+          id: p.id,
+          available_shares: p.availableShares,
+          price_per_share: p.pricePerShare,
+        })) as unknown as Property[])
+      }
     }
     fetchParcels()
   }, [])
+
+  // Convert to format MapComponent expects
+  const mapParcels = parcels.map(p => ({
+    id: p.id,
+    title: (p as unknown as { title: string }).title,
+    latitude: p.latitude,
+    longitude: p.longitude,
+    available_shares: p.availableShares,
+    price_per_share: p.pricePerShare,
+  }))
 
   return (
     <main style={{
@@ -71,7 +96,7 @@ export default function MapPage() {
         </div>
 
         {/* Map */}
-        <MapComponent parcels={parcels} />
+        <MapComponent parcels={mapParcels} />
 
         {/* Legend */}
         <div style={{

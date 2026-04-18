@@ -1,44 +1,60 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/contexts/AuthContext'
+import { useWeb3 } from '@/contexts/Web3Context'
+import { api } from '@/lib/api'
+
+interface Investment {
+  id: string
+  sharesOwned: number
+  purchasePrice: number
+  property: {
+    id: string
+    title: string
+    pricePerShare: number
+    totalShares: number
+    location: string
+  }
+}
 
 export default function Dashboard() {
-  const [user, setUser] = useState<any>(null)
-  const [holdings, setHoldings] = useState<any[]>([])
+  const { user, token, loading: authLoading } = useAuth()
+  const { walletAddress, linkWallet } = useWeb3()
+  const [investments, setInvestments] = useState<Investment[]>([])
   const [loading, setLoading] = useState(true)
+  const [linkMsg, setLinkMsg] = useState('')
 
   useEffect(() => {
-    const fetchData = async () => {
-      // Get current user
-      const { data: { session } } = await supabase.auth.getSession()
-      const currentUser = session?.user ?? null
-      setUser(currentUser)
-
-      if (!currentUser) {
-        window.location.href = '/auth'
-        return
-      }
-
-      // Get all shares owned by this user
-      const { data: shares } = await supabase
-        .from('ownership_shares')
-        .select('*, land_parcels(*)')
-        .eq('user_id', currentUser.id)
-
-      setHoldings(shares || [])
-      setLoading(false)
+    if (authLoading) return
+    if (!user) {
+      window.location.href = '/auth'
+      return
     }
-    fetchData()
-  }, [])
+    fetchInvestments()
+  }, [user, authLoading])
 
-  // Calculate total portfolio value
-  const totalValue = holdings.reduce((sum, h) => {
-    return sum + (h.shares_owned * h.land_parcels.price_per_share)
-  }, 0)
+  const fetchInvestments = async () => {
+    const res = await api.get<{ investments: Investment[] }>('/api/investments', token)
+    if (res.ok && res.data) {
+      setInvestments(res.data.investments)
+    }
+    setLoading(false)
+  }
 
-  const totalShares = holdings.reduce((sum, h) => sum + h.shares_owned, 0)
+  const handleLinkWallet = async () => {
+    setLinkMsg('')
+    const error = await linkWallet()
+    if (error) setLinkMsg('❌ ' + error)
+    else setLinkMsg('✅ Wallet linked successfully!')
+  }
 
-  if (loading) return (
+  const totalValue = investments.reduce(
+    (sum, h) => sum + h.sharesOwned * h.property.pricePerShare,
+    0
+  )
+  const totalShares = investments.reduce((sum, h) => sum + h.sharesOwned, 0)
+
+  if (authLoading || loading) return (
     <main style={{
       minHeight: '100vh',
       backgroundColor: '#0f1e0f',
@@ -77,11 +93,74 @@ export default function Dashboard() {
             My Portfolio
           </div>
           <h1 style={{ color: '#f5f0e8', fontSize: '2.5rem', margin: '0 0 0.5rem 0' }}>
-            Welcome back! 👋
+            Welcome back, {user?.name || 'Investor'}! 👋
           </h1>
           <p style={{ color: '#a8c5a0', fontSize: '1rem', margin: 0 }}>
             {user?.email}
           </p>
+        </div>
+
+        {/* Wallet section */}
+        <div style={{
+          backgroundColor: '#132213',
+          border: '1px solid rgba(200, 169, 110, 0.2)',
+          borderRadius: '16px',
+          padding: '1.5rem',
+          marginBottom: '2rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '1rem'
+        }}>
+          <div>
+            <div style={{ color: '#a8c5a0', fontSize: '0.85rem', marginBottom: '0.3rem' }}>
+              🦊 Wallet
+            </div>
+            <div style={{ color: '#f5f0e8', fontSize: '1rem' }}>
+              {user?.walletAddress
+                ? `${user.walletAddress.slice(0, 6)}...${user.walletAddress.slice(-4)}`
+                : walletAddress
+                  ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)} (not linked)`
+                  : 'No wallet connected'
+              }
+            </div>
+            {linkMsg && <div style={{ color: '#a8c5a0', fontSize: '0.8rem', marginTop: '0.3rem' }}>{linkMsg}</div>}
+          </div>
+          {walletAddress && !user?.walletAddress && (
+            <button onClick={handleLinkWallet} style={{
+              backgroundColor: '#c8a96e',
+              color: '#1a2e1a',
+              border: 'none',
+              padding: '0.6rem 1.5rem',
+              borderRadius: '25px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              fontSize: '0.85rem',
+              fontFamily: 'Georgia, serif',
+            }}>
+              Link Wallet
+            </button>
+          )}
+        </div>
+
+        {/* Quick actions */}
+        <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
+          <a href="/profile" style={{
+            color: '#a8c5a0', textDecoration: 'none', fontSize: '0.85rem',
+            backgroundColor: 'rgba(200, 169, 110, 0.08)', border: '1px solid rgba(200, 169, 110, 0.15)',
+            padding: '0.5rem 1.2rem', borderRadius: '25px'
+          }}>👤 Profile</a>
+          <a href="/kyc" style={{
+            color: '#a8c5a0', textDecoration: 'none', fontSize: '0.85rem',
+            backgroundColor: 'rgba(200, 169, 110, 0.08)', border: '1px solid rgba(200, 169, 110, 0.15)',
+            padding: '0.5rem 1.2rem', borderRadius: '25px'
+          }}>🪪 KYC ({user?.kycStatus})</a>
+          <a href="/marketplace/sell" style={{
+            color: '#a8c5a0', textDecoration: 'none', fontSize: '0.85rem',
+            backgroundColor: 'rgba(200, 169, 110, 0.08)', border: '1px solid rgba(200, 169, 110, 0.15)',
+            padding: '0.5rem 1.2rem', borderRadius: '25px'
+          }}>📤 Sell Shares</a>
         </div>
 
         {/* Summary cards */}
@@ -94,7 +173,7 @@ export default function Dashboard() {
           {[
             { label: 'Total Portfolio Value', value: `₹${totalValue.toLocaleString()}`, icon: '💰' },
             { label: 'Total Shares Owned', value: totalShares, icon: '📊' },
-            { label: 'Land Parcels', value: holdings.length, icon: '🌿' },
+            { label: 'Land Parcels', value: investments.length, icon: '🌿' },
           ].map((stat) => (
             <div key={stat.label} style={{
               backgroundColor: '#132213',
@@ -119,7 +198,7 @@ export default function Dashboard() {
           Your Land Holdings
         </h2>
 
-        {holdings.length === 0 ? (
+        {investments.length === 0 ? (
           <div style={{
             backgroundColor: '#132213',
             border: '1px solid rgba(200, 169, 110, 0.2)',
@@ -129,7 +208,7 @@ export default function Dashboard() {
           }}>
             <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🌍</div>
             <p style={{ color: '#a8c5a0', fontSize: '1.1rem', marginBottom: '1.5rem' }}>
-              You don't own any shares yet!
+              You don&apos;t own any shares yet!
             </p>
             <a href="/parcels" style={{
               backgroundColor: '#c8a96e',
@@ -145,8 +224,8 @@ export default function Dashboard() {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {holdings.map((holding) => (
-              <div key={holding.id} style={{
+            {investments.map((inv) => (
+              <div key={inv.id} style={{
                 backgroundColor: '#132213',
                 border: '1px solid rgba(200, 169, 110, 0.2)',
                 borderRadius: '16px',
@@ -173,11 +252,11 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <h3 style={{ color: '#f5f0e8', margin: '0 0 0.3rem 0', fontSize: '1.1rem' }}>
-                      {holding.land_parcels.title}
+                      {inv.property.title}
                     </h3>
                     <p style={{ color: '#a8c5a0', margin: 0, fontSize: '0.85rem' }}>
-                      {holding.shares_owned} share{holding.shares_owned > 1 ? 's' : ''} •{' '}
-                      {((holding.shares_owned / holding.land_parcels.total_shares) * 100).toFixed(2)}% ownership
+                      {inv.sharesOwned} share{inv.sharesOwned > 1 ? 's' : ''} •{' '}
+                      {((inv.sharesOwned / inv.property.totalShares) * 100).toFixed(2)}% ownership
                     </p>
                   </div>
                 </div>
@@ -185,12 +264,12 @@ export default function Dashboard() {
                 {/* Right */}
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ color: '#c8a96e', fontSize: '1.3rem', fontWeight: 'bold' }}>
-                    ₹{(holding.shares_owned * holding.land_parcels.price_per_share).toLocaleString()}
+                    ₹{(inv.sharesOwned * inv.property.pricePerShare).toLocaleString()}
                   </div>
                   <div style={{ color: '#a8c5a0', fontSize: '0.8rem', marginTop: '0.2rem' }}>
-                    ₹{holding.land_parcels.price_per_share.toLocaleString()} per share
+                    ₹{inv.property.pricePerShare.toLocaleString()} per share
                   </div>
-                  <a href={`/parcels/${holding.land_parcels.id}`} style={{
+                  <a href={`/parcels/${inv.property.id}`} style={{
                     color: '#c8a96e',
                     fontSize: '0.85rem',
                     textDecoration: 'none',

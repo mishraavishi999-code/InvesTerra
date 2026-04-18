@@ -1,0 +1,201 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── User ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum KycStatus {
+  NOT_SUBMITTED
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  name          String?
+  phone         String?
+  walletAddress String?  @unique
+  kycStatus     KycStatus @default(NOT_SUBMITTED)
+  role          Role     @default(USER)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  investments   Investment[]
+  kycDocuments  KycDocument[]
+  listingsSold  Listing[]      @relation("seller")
+  txFrom        Transaction[]  @relation("txFrom")
+  txTo          Transaction[]  @relation("txTo")
+}
+
+// ─── Property (Land Parcel) ──────────────────────────────────────────────────
+
+enum PropertyStatus {
+  ACTIVE
+  SOLD_OUT
+  UPCOMING
+}
+
+model Property {
+  id              String         @id @default(cuid())
+  title           String
+  description     String
+  location        String
+  totalArea       Float
+  latitude        Float
+  longitude       Float
+  totalShares     Int
+  availableShares Int
+  pricePerShare   Float
+  status          PropertyStatus @default(ACTIVE)
+  imageUrl        String?
+  spvName         String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  investments  Investment[]
+  listings     Listing[]
+  transactions Transaction[]
+}
+
+// ─── Investment ──────────────────────────────────────────────────────────────
+
+enum InvestmentStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+model Investment {
+  id            String           @id @default(cuid())
+  userId        String
+  propertyId    String
+  sharesOwned   Int
+  purchasePrice Float
+  tokenId       Int?
+  txHash        String?
+  status        InvestmentStatus @default(PENDING)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id])
+  property Property @relation(fields: [propertyId], references: [id])
+
+  @@index([userId])
+  @@index([propertyId])
+}
+
+// ─── Marketplace Listing ─────────────────────────────────────────────────────
+
+enum ListingStatus {
+  ACTIVE
+  SOLD
+  CANCELLED
+}
+
+model Listing {
+  id         String        @id @default(cuid())
+  sellerId   String
+  propertyId String
+  shares     Int
+  askPrice   Float
+  status     ListingStatus @default(ACTIVE)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  seller   User     @relation("seller", fields: [sellerId], references: [id])
+  property Property @relation(fields: [propertyId], references: [id])
+
+  @@index([sellerId])
+  @@index([propertyId])
+  @@index([status])
+}
+
+// ─── Transaction ─────────────────────────────────────────────────────────────
+
+enum TransactionType {
+  BUY
+  SELL
+  TRANSFER
+}
+
+enum PaymentMethod {
+  RAZORPAY
+  CRYPTO_MATIC
+  CRYPTO_USDT
+  WALLET
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+model Transaction {
+  id            String            @id @default(cuid())
+  fromUserId    String?
+  toUserId      String
+  propertyId    String
+  shares        Int
+  pricePerShare Float
+  totalAmount   Float
+  type          TransactionType
+  paymentMethod PaymentMethod
+  paymentId     String?
+  txHash        String?
+  status        TransactionStatus @default(PENDING)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  fromUser User?    @relation("txFrom", fields: [fromUserId], references: [id])
+  toUser   User     @relation("txTo", fields: [toUserId], references: [id])
+  property Property @relation(fields: [propertyId], references: [id])
+
+  @@index([fromUserId])
+  @@index([toUserId])
+  @@index([propertyId])
+}
+
+// ─── KYC Document ────────────────────────────────────────────────────────────
+
+enum DocumentType {
+  AADHAAR
+  PAN
+  PASSPORT
+  VOTER_ID
+}
+
+enum DocumentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model KycDocument {
+  id           String         @id @default(cuid())
+  userId       String
+  documentType DocumentType
+  documentUrl  String
+  status       DocumentStatus @default(PENDING)
+  adminNotes   String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}

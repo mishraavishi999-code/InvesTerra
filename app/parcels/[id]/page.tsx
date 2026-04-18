@@ -1,71 +1,125 @@
 'use client'
 import { useEffect, useState, use } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/contexts/AuthContext'
+import { api } from '@/lib/api'
+
+interface Property {
+  id: string
+  title: string
+  description: string
+  location: string
+  totalArea: number
+  totalShares: number
+  availableShares: number
+  pricePerShare: number
+  spvName: string | null
+}
 
 export default function ParcelDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const [parcel, setParcel] = useState<any>(null)
+  const { user, token } = useAuth()
+  const [parcel, setParcel] = useState<Property | null>(null)
   const [loading, setLoading] = useState(true)
   const [shares, setShares] = useState(1)
   const [buying, setBuying] = useState(false)
   const [message, setMessage] = useState('')
-  const [user, setUser] = useState<any>(null)
 
   useEffect(() => {
-    // Get current user
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-    })
-
-    // Get parcel details
     const fetchParcel = async () => {
-      const { data } = await supabase
-        .from('land_parcels')
-        .select('*')
-        .eq('id', id)
-        .single()
-      setParcel(data)
+      const res = await api.get<{ property: Property }>(`/api/properties/${id}`)
+      if (res.ok && res.data) {
+        setParcel(res.data.property)
+      }
       setLoading(false)
     }
     fetchParcel()
   }, [id])
 
   const handleBuy = async () => {
-    if (!user) {
+    if (!user || !token) {
       window.location.href = '/auth'
       return
     }
+    if (!parcel) return
 
     setBuying(true)
     setMessage('')
 
-    // Check enough shares available
-    if (shares > parcel.available_shares) {
+    if (shares > parcel.availableShares) {
       setMessage('❌ Not enough shares available!')
       setBuying(false)
       return
     }
 
-    // Record the purchase
-    const { error } = await supabase
-      .from('ownership_shares')
-      .insert({
-        parcel_id: parcel.id,
-        user_id: user.id,
-        shares_owned: shares
-      })
+    const totalAmount = shares * parcel.pricePerShare
 
-    if (error) {
-      setMessage('❌ Something went wrong. Please try again.')
+    const orderRes = await api.post<{ order: { id: string; amount: number } }>(
+      '/api/payments/razorpay/create',
+      { amount: totalAmount, propertyId: parcel.id, shares },
+      token
+    )
+
+    if (orderRes.ok && orderRes.data) {
+      // Load Razorpay checkout
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        amount: orderRes.data.order.amount,
+        currency: 'INR',
+        name: 'InvesTerra',
+        description: `${shares} share(s) of ${parcel.title}`,
+        order_id: orderRes.data.order.id,
+        handler: async function (response: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) {
+          // Verify payment
+          const verifyRes = await api.post<{ verified: boolean; paymentId: string }>(
+            '/api/payments/razorpay/verify',
+            response,
+            token
+          )
+
+          if (verifyRes.ok && verifyRes.data?.verified) {
+            // Create investment
+            const investRes = await api.post(
+              '/api/investments',
+              {
+                propertyId: parcel.id,
+                shares,
+                paymentId: verifyRes.data.paymentId,
+                paymentMethod: 'RAZORPAY',
+              },
+              token
+            )
+
+            if (investRes.ok) {
+              setMessage(`✅ Congratulations! You now own ${shares} share(s) of ${parcel.title}!`)
+              setParcel({ ...parcel, availableShares: parcel.availableShares - shares })
+            } else {
+              setMessage('❌ Payment verified but investment creation failed. Contact support.')
+            }
+          } else {
+            setMessage('❌ Payment verification failed.')
+          }
+          setBuying(false)
+        },
+        prefill: { email: user.email, name: user.name || '' },
+        theme: { color: '#c8a96e' },
+        modal: {
+          ondismiss: function () {
+            setBuying(false)
+          }
+        }
+      }
+
+      // Check if Razorpay script is loaded
+      if (typeof window !== 'undefined' && (window as unknown as { Razorpay?: new (options: unknown) => { open: () => void } }).Razorpay) {
+        const rzp = new ((window as unknown as { Razorpay: new (options: unknown) => { open: () => void } }).Razorpay)(options)
+        rzp.open()
+      } else {
+        setMessage('❌ Razorpay SDK not loaded. Please ensure you are connected to the internet.')
+        setBuying(false)
+      }
     } else {
-      // Update available shares
-      await supabase
-        .from('land_parcels')
-        .update({ available_shares: parcel.available_shares - shares })
-        .eq('id', parcel.id)
-
-      setMessage(`✅ Congratulations! You now own ${shares} share(s) of ${parcel.title}!`)
-      setParcel({ ...parcel, available_shares: parcel.available_shares - shares })
+      setMessage('❌ Payment Initialization Failed: ' + (orderRes.error || 'Please check Razorpay keys.'))
+      setBuying(false)
     }
     setBuying(false)
   }
@@ -98,17 +152,18 @@ export default function ParcelDetail({ params }: { params: Promise<{ id: string 
     </main>
   )
 
-  const ownershipPercent = ((shares / parcel.total_shares) * 100).toFixed(2)
-  const totalCost = shares * parcel.price_per_share
+  const ownershipPercent = ((shares / parcel.totalShares) * 100).toFixed(2)
+  const totalCost = shares * parcel.pricePerShare
 
   return (
     <main style={{
       minHeight: '100vh',
       backgroundColor: '#0f1e0f',
-      paddingTop: '6rem',
-      paddingBottom: '4rem',
       padding: '6rem 2rem 4rem'
     }}>
+      {/* Razorpay script */}
+      <script src="https://checkout.razorpay.com/v1/checkout.js" async />
+
       <div style={{ maxWidth: '900px', margin: '0 auto' }}>
 
         {/* Back button */}
@@ -147,6 +202,9 @@ export default function ParcelDetail({ params }: { params: Promise<{ id: string 
 
           {/* Left — details */}
           <div>
+            <div style={{ color: '#c8a96e', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
+              📍 {parcel.location}
+            </div>
             <h1 style={{
               color: '#f5f0e8',
               fontSize: '2.2rem',
@@ -154,6 +212,21 @@ export default function ParcelDetail({ params }: { params: Promise<{ id: string 
             }}>
               {parcel.title}
             </h1>
+
+            {parcel.spvName && (
+              <div style={{
+                display: 'inline-block',
+                backgroundColor: 'rgba(200, 169, 110, 0.1)',
+                border: '1px solid rgba(200, 169, 110, 0.2)',
+                color: '#c8a96e',
+                padding: '0.3rem 0.8rem',
+                borderRadius: '20px',
+                fontSize: '0.8rem',
+                marginBottom: '1.5rem'
+              }}>
+                🏛️ {parcel.spvName}
+              </div>
+            )}
 
             <p style={{
               color: '#a8c5a0',
@@ -172,10 +245,10 @@ export default function ParcelDetail({ params }: { params: Promise<{ id: string 
               marginBottom: '2rem'
             }}>
               {[
-                { label: 'Total Area', value: `${parcel.total_area} acres` },
-                { label: 'Total Shares', value: parcel.total_shares },
-                { label: 'Available Shares', value: parcel.available_shares },
-                { label: 'Price Per Share', value: `₹${parcel.price_per_share.toLocaleString()}` },
+                { label: 'Total Area', value: `${parcel.totalArea} acres` },
+                { label: 'Total Shares', value: parcel.totalShares },
+                { label: 'Available Shares', value: parcel.availableShares },
+                { label: 'Price Per Share', value: `₹${parcel.pricePerShare.toLocaleString()}` },
               ].map((stat) => (
                 <div key={stat.label} style={{
                   backgroundColor: '#132213',
@@ -229,7 +302,7 @@ export default function ParcelDetail({ params }: { params: Promise<{ id: string 
                   {shares}
                 </span>
                 <button
-                  onClick={() => setShares(Math.min(parcel.available_shares, shares + 1))}
+                  onClick={() => setShares(Math.min(parcel.availableShares, shares + 1))}
                   style={{
                     width: '36px', height: '36px',
                     borderRadius: '50%',
@@ -274,7 +347,8 @@ export default function ParcelDetail({ params }: { params: Promise<{ id: string 
                 fontSize: '1rem',
                 fontWeight: 'bold',
                 cursor: buying ? 'not-allowed' : 'pointer',
-                opacity: buying ? 0.7 : 1
+                opacity: buying ? 0.7 : 1,
+                fontFamily: 'Georgia, serif',
               }}
             >
               {buying ? 'Processing...' : user ? 'Buy Now →' : 'Sign In to Buy →'}
@@ -283,7 +357,7 @@ export default function ParcelDetail({ params }: { params: Promise<{ id: string 
             {/* Message */}
             {message && (
               <p style={{
-                color: '#a8c5a0',
+                color: message.startsWith('❌') ? '#ef4444' : '#a8c5a0',
                 textAlign: 'center',
                 marginTop: '1rem',
                 fontSize: '0.9rem',
@@ -294,7 +368,7 @@ export default function ParcelDetail({ params }: { params: Promise<{ id: string 
             )}
 
             <p style={{ color: '#a8c5a0', fontSize: '0.75rem', textAlign: 'center', marginTop: '1rem' }}>
-              {parcel.available_shares} of {parcel.total_shares} shares remaining
+              {parcel.availableShares} of {parcel.totalShares} shares remaining
             </p>
           </div>
         </div>

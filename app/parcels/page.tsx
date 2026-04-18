@@ -1,17 +1,29 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { api } from '@/lib/api'
+
+interface Property {
+  id: string
+  title: string
+  description: string
+  location: string
+  totalArea: number
+  totalShares: number
+  availableShares: number
+  pricePerShare: number
+  imageUrl: string | null
+}
 
 export default function ParcelsPage() {
-  const [parcels, setParcels] = useState<any[]>([])
+  const [parcels, setParcels] = useState<Property[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const fetchParcels = async () => {
-      const { data } = await supabase
-        .from('land_parcels')
-        .select('*')
-      setParcels(data || [])
+      const res = await api.get<{ properties: Property[] }>('/api/properties')
+      if (res.ok && res.data) {
+        setParcels(res.data.properties)
+      }
       setLoading(false)
     }
     fetchParcels()
@@ -114,7 +126,7 @@ export default function ParcelsPage() {
                 fontSize: '0.8rem',
                 fontFamily: 'Georgia, serif'
               }}>
-                {parcel.available_shares} shares left
+                {parcel.availableShares} shares left
               </div>
             </div>
 
@@ -122,11 +134,14 @@ export default function ParcelsPage() {
             <div style={{ padding: '1.5rem' }}>
               <h3 style={{
                 color: '#f5f0e8',
-                margin: '0 0 0.5rem 0',
+                margin: '0 0 0.3rem 0',
                 fontSize: '1.2rem'
               }}>
                 {parcel.title}
               </h3>
+              <div style={{ color: '#c8a96e', fontSize: '0.8rem', marginBottom: '0.5rem' }}>
+                📍 {parcel.location}
+              </div>
               <p style={{
                 color: '#a8c5a0',
                 fontSize: '0.9rem',
@@ -152,7 +167,7 @@ export default function ParcelsPage() {
                     Price per share
                   </div>
                   <div style={{ color: '#c8a96e', fontWeight: 'bold', fontSize: '1.1rem' }}>
-                    ₹{parcel.price_per_share.toLocaleString()}
+                    ₹{parcel.pricePerShare.toLocaleString()}
                   </div>
                 </div>
                 <div style={{ textAlign: 'center' }}>
@@ -160,7 +175,7 @@ export default function ParcelsPage() {
                     Total area
                   </div>
                   <div style={{ color: '#f5f0e8', fontWeight: 'bold' }}>
-                    {parcel.total_area} acres
+                    {parcel.totalArea} acres
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
@@ -168,7 +183,7 @@ export default function ParcelsPage() {
                     Total shares
                   </div>
                   <div style={{ color: '#f5f0e8', fontWeight: 'bold' }}>
-                    {parcel.total_shares}
+                    {parcel.totalShares}
                   </div>
                 </div>
               </div>
@@ -184,7 +199,8 @@ export default function ParcelsPage() {
                 borderRadius: '10px',
                 fontSize: '0.95rem',
                 fontWeight: 'bold',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                fontFamily: 'Georgia, serif',
               }}>
                 View Parcel →
               </button>
